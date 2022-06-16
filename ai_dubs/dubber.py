@@ -42,7 +42,7 @@ def decode_audio(inFile, outFile):
         inFile (String): i.e. my/great/movie.mp4
         outFile (String): i.e. my/great/movie.wav
     """
-    if not outFile[-4:] != "wav":
+    if outFile[-4:] == "wav":
         outFile += ".wav"
     AudioSegment.from_file(inFile).set_channels(
         1).export(outFile, format="wav")
@@ -124,9 +124,7 @@ def parse_sentence_with_speaker(json, lang):
 
     # Special case for parsing japanese words
     def get_word(word, lang):
-        if lang == "ja":
-            return word.split('|')[0]
-        return word
+        return word.split('|')[0] if lang == "ja" else word
 
     sentences = []
     sentence = {}
@@ -207,14 +205,16 @@ def speak(text, languageCode, voiceName=None, speakingRate=1):
 
     # Build the voice request, select the language code ("en-US") and the ssml
     # voice gender ("neutral")
-    if not voiceName:
-        voice = texttospeech.VoiceSelectionParams(
-            language_code=languageCode, ssml_gender=texttospeech.SsmlVoiceGender.NEUTRAL
-        )
-    else:
-        voice = texttospeech.VoiceSelectionParams(
+    voice = (
+        texttospeech.VoiceSelectionParams(
             language_code=languageCode, name=voiceName
         )
+        if voiceName
+        else texttospeech.VoiceSelectionParams(
+            language_code=languageCode,
+            ssml_gender=texttospeech.SsmlVoiceGender.NEUTRAL,
+        )
+    )
 
     # Select the type of audio file you want returned
     audio_config = texttospeech.AudioConfig(
@@ -263,8 +263,7 @@ def speakUnderDuration(text, languageCode, durationSecs, voiceName=None):
 
     # round to one decimal point and go a little faster to be safe,
     ratio = round(ratio, 1)
-    if ratio > 4:
-        ratio = 4
+    ratio = min(ratio, 4)
     return speak(text, languageCode, voiceName=voiceName, speakingRate=ratio)
 
 
@@ -305,7 +304,7 @@ def toSrt(transcripts, charsPerLine=60):
         return "%d:%d:%d,%d" % (hours, minutes, seconds, millisecs)
 
     def _toSrt(words, startTime, endTime, index):
-        return f"{index}\n" + _srtTime(startTime) + " --> " + _srtTime(endTime) + f"\n{words}"
+        return f"{index}\n{_srtTime(startTime)} --> {_srtTime(endTime)}" + f"\n{words}"
 
     startTime = None
     sentence = ""
@@ -416,14 +415,14 @@ def dub(
 
     outputFiles = os.listdir(outputDir)
 
-    if not f"{baseName}.wav" in outputFiles:
+    if f"{baseName}.wav" not in outputFiles:
         print("Extracting audio from video")
-        fn = os.path.join(outputDir, baseName + ".wav")
+        fn = os.path.join(outputDir, f"{baseName}.wav")
         decode_audio(videoFile, fn)
         print(f"Wrote {fn}")
 
-    if not f"transcript.json" in outputFiles:
-        storageBucket = storageBucket if storageBucket else os.environ['STORAGE_BUCKET']
+    if "transcript.json" not in outputFiles:
+        storageBucket = storageBucket or os.environ['STORAGE_BUCKET']
         if not storageBucket:
             raise Exception(
                 "Specify variable STORAGE_BUCKET in .env or as an arg")
@@ -433,11 +432,14 @@ def dub(
         storage_client = storage.Client()
         bucket = storage_client.bucket(storageBucket)
 
-        tmpFile = os.path.join("tmp", str(uuid.uuid4()) + ".wav")
+        tmpFile = os.path.join("tmp", f"{str(uuid.uuid4())}.wav")
         blob = bucket.blob(tmpFile)
         # Temporary upload audio file to the cloud
-        blob.upload_from_filename(os.path.join(
-            outputDir, baseName + ".wav"), content_type="audio/wav")
+        blob.upload_from_filename(
+            os.path.join(outputDir, f"{baseName}.wav"),
+            content_type="audio/wav",
+        )
+
 
         print("Transcribing...")
         transcripts = get_transcripts_json(os.path.join(
@@ -448,7 +450,7 @@ def dub(
             outputDir, "transcript.json"), "w"))
 
         sentences = parse_sentence_with_speaker(transcripts, srcLang)
-        fn = os.path.join(outputDir, baseName + ".json")
+        fn = os.path.join(outputDir, f"{baseName}.json")
         with open(fn, "w") as f:
             json.dump(sentences, f)
         print(f"Wrote {fn}")
@@ -465,7 +467,7 @@ def dub(
         print(
             f"Wrote srt subtitles to {os.path.join(outputDir, 'subtitles.srt')}")
 
-    sentences = json.load(open(os.path.join(outputDir, baseName + ".json")))
+    sentences = json.load(open(os.path.join(outputDir, f"{baseName}.json")))
     sentence = sentences[0]
 
     if not noTranslate:
@@ -476,12 +478,12 @@ def dub(
                     sentence[srcLang], lang, srcLang)
 
         # Write the translations to json
-        fn = os.path.join(outputDir, baseName + ".json")
+        fn = os.path.join(outputDir, f"{baseName}.json")
         with open(fn, "w") as f:
             json.dump(sentences, f)
 
     audioDir = os.path.join(outputDir, "audioClips")
-    if not "audioClips" in outputFiles:
+    if "audioClips" not in outputFiles:
         os.mkdir(audioDir)
 
     # whether or not to also dub the source language
@@ -507,12 +509,12 @@ def dub(
 
     dubbedDir = os.path.join(outputDir, "dubbedVideos")
 
-    if not "dubbedVideos" in outputFiles:
+    if "dubbedVideos" not in outputFiles:
         os.mkdir(dubbedDir)
 
     for lang in targetLangs:
         print(f"Dubbing audio for {lang}")
-        outFile = os.path.join(dubbedDir, lang + ".mp4")
+        outFile = os.path.join(dubbedDir, f"{lang}.mp4")
         stitch_audio(sentences, os.path.join(
             audioDir, lang), videoFile, outFile, srtPath=srtPath)
 
